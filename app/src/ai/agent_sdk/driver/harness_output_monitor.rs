@@ -59,10 +59,7 @@ pub(crate) fn build_dfas(patterns: &[&str]) -> Option<RegexDFAs> {
 /// Map a `matched_text` produced by the combined DFA back to the originating
 /// needle. The DFA matched `(p1|p2|…)`, so the matched substring is exactly
 /// one of `patterns` up to case — we lowercase-compare to identify it.
-pub(crate) fn pattern_for_match<'a>(
-    matched_text: &str,
-    patterns: &[&'a str],
-) -> Option<&'a str> {
+pub(crate) fn pattern_for_match<'a>(matched_text: &str, patterns: &[&'a str]) -> Option<&'a str> {
     let matched_lower = matched_text.to_lowercase();
     patterns
         .iter()

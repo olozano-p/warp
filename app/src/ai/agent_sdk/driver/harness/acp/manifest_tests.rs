@@ -55,7 +55,11 @@ fn discovery_selects_override_then_mount_then_bundle_without_merging() {
         serde_json::from_slice(&fs::read(resources.join("bundled/harnesses/pi.json")).unwrap())
             .unwrap();
     bundle["install_docs_url"] = json!("https://example.test/install");
-    fs::write(resources.join("bundled/harnesses/pi.json"), bundle.to_string()).unwrap();
+    fs::write(
+        resources.join("bundled/harnesses/pi.json"),
+        bundle.to_string(),
+    )
+    .unwrap();
 
     let selected = discover(Harness::Pi, Some(&override_dir), &mounts, Some(&resources)).unwrap();
     assert_eq!(selected.launch.args, ["override"]);
@@ -86,14 +90,24 @@ fn override_errors_do_not_fall_through_to_a_valid_bundle() {
     wrong["harness"] = json!("codex");
     fs::write(&path, wrong.to_string()).unwrap();
 
-    let error = discover(Harness::Pi, Some(&override_dir), root.path(), Some(&resources))
-        .err()
-        .unwrap();
+    let error = discover(
+        Harness::Pi,
+        Some(&override_dir),
+        root.path(),
+        Some(&resources),
+    )
+    .err()
+    .unwrap();
     assert!(error.to_string().contains("expected pi"));
     fs::remove_file(&path).unwrap();
-    let error = discover(Harness::Pi, Some(&override_dir), root.path(), Some(&resources))
-        .err()
-        .unwrap();
+    let error = discover(
+        Harness::Pi,
+        Some(&override_dir),
+        root.path(),
+        Some(&resources),
+    )
+    .err()
+    .unwrap();
     assert!(error.to_string().contains(&path.display().to_string()));
 }
 
@@ -204,8 +218,10 @@ fn unsupported_versions_and_unknown_fields_are_rejected() {
     auth["auth"] = json!({"unknown": true});
     for invalid in [top_level, acp, auth] {
         fs::write(&path, invalid.to_string()).unwrap();
-        assert!(format!("{:#}", read_manifest(&path, Harness::Pi).unwrap_err())
-            .contains("unknown field"));
+        assert!(
+            format!("{:#}", read_manifest(&path, Harness::Pi).unwrap_err())
+                .contains("unknown field")
+        );
     }
 }
 
@@ -221,8 +237,14 @@ fn missing_manifest_error_lists_all_discovery_locations() {
     for expected in [
         "pi".to_owned(),
         "$WARP_HARNESS_SIDECAR/warp-harness.json".to_owned(),
-        mounts.join("pi-cli-sidecar/warp-harness.json").display().to_string(),
-        resources.join("bundled/harnesses/pi.json").display().to_string(),
+        mounts
+            .join("pi-cli-sidecar/warp-harness.json")
+            .display()
+            .to_string(),
+        resources
+            .join("bundled/harnesses/pi.json")
+            .display()
+            .to_string(),
     ] {
         assert!(error.contains(&expected), "{error}");
     }

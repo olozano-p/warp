@@ -27,7 +27,11 @@ pub(super) const PI_CODING_AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 /// installation can locate its own assets when neither provides a directory.
 fn pi_package_dir(resolved_env_vars: &HashMap<OsString, OsString>) -> Option<PathBuf> {
     std::env::var_os(PI_PACKAGE_DIR_ENV)
-        .or_else(|| resolved_env_vars.get(OsStr::new(PI_PACKAGE_DIR_ENV)).cloned())
+        .or_else(|| {
+            resolved_env_vars
+                .get(OsStr::new(PI_PACKAGE_DIR_ENV))
+                .cloned()
+        })
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }

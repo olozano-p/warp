@@ -69,8 +69,10 @@ fn discover(
     let mount_path = mounts_dir
         .join(format!("{harness}-cli-sidecar"))
         .join(MANIFEST_FILE);
-    let bundle_path =
-        resources_dir.map(|root| root.join("bundled/harnesses").join(format!("{harness}.json")));
+    let bundle_path = resources_dir.map(|root| {
+        root.join("bundled/harnesses")
+            .join(format!("{harness}.json"))
+    });
     let (path, is_sidecar) = if let Some(dir) = override_dir {
         (dir.join(MANIFEST_FILE), true)
     } else if mount_path
@@ -115,7 +117,8 @@ fn discover(
 }
 
 fn read_manifest(path: &Path, harness: Harness) -> Result<Manifest> {
-    let bytes = fs::read(path).with_context(|| format!("Cannot read manifest {}", path.display()))?;
+    let bytes =
+        fs::read(path).with_context(|| format!("Cannot read manifest {}", path.display()))?;
     let manifest: Manifest = serde_json::from_slice(&bytes)
         .with_context(|| format!("Invalid manifest {}", path.display()))?;
     if manifest.schema_version != 1 {
@@ -140,13 +143,20 @@ fn resolve_sidecar_program(dir: &Path, program: &str) -> Result<String> {
         bail!("Sidecar ACP program must be a bare filename, got {program:?}");
     }
     let path = dir.join("usr/local/bin").join(program);
-    let metadata = fs::metadata(&path)
-        .with_context(|| format!("Sidecar ACP executable {} is missing or unreadable", path.display()))?;
+    let metadata = fs::metadata(&path).with_context(|| {
+        format!(
+            "Sidecar ACP executable {} is missing or unreadable",
+            path.display()
+        )
+    })?;
     if !metadata.is_file() {
         bail!("Sidecar ACP executable {} is not a file", path.display());
     }
     if !file_exists_and_is_executable(&path) {
-        bail!("Sidecar ACP executable {} is not executable", path.display());
+        bail!(
+            "Sidecar ACP executable {} is not executable",
+            path.display()
+        );
     }
     path.into_os_string()
         .into_string()
@@ -160,16 +170,19 @@ fn resolve_env(
 ) -> HashMap<OsString, OsString> {
     env.iter()
         .map(|(name, value)| {
-            let resolved = process_env.get(OsStr::new(name)).cloned().unwrap_or_else(|| {
-                let mut resolved = OsString::new();
-                let mut parts = value.split(MANIFEST_DIR);
-                resolved.push(parts.next().unwrap_or_default());
-                for part in parts {
-                    resolved.push(dir);
-                    resolved.push(part);
-                }
-                resolved
-            });
+            let resolved = process_env
+                .get(OsStr::new(name))
+                .cloned()
+                .unwrap_or_else(|| {
+                    let mut resolved = OsString::new();
+                    let mut parts = value.split(MANIFEST_DIR);
+                    resolved.push(parts.next().unwrap_or_default());
+                    for part in parts {
+                        resolved.push(dir);
+                        resolved.push(part);
+                    }
+                    resolved
+                });
             (OsString::from(name), resolved)
         })
         .collect()
