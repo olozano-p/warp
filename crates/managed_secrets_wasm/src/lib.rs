@@ -118,6 +118,23 @@ pub fn encrypt_openai_api_key_secret(
     )
 }
 
+/// Encrypt a provider-scoped Pi API key secret.
+#[wasm_bindgen]
+pub fn encrypt_pi_provider_api_key_secret(
+    public_key_base64: &str,
+    actor_uid: &str,
+    secret_name: &str,
+    provider_id: &str,
+    api_key: &str,
+) -> Result<String, JsValue> {
+    do_encrypt(
+        public_key_base64,
+        actor_uid,
+        secret_name,
+        &ManagedSecretValue::pi_provider_api_key(provider_id, api_key, None),
+    )
+}
+
 /// Encrypt a private image credential secret.
 #[wasm_bindgen]
 pub fn encrypt_docker_registry_secret(

@@ -999,6 +999,22 @@ fn metadata_secret_collision_rejects_even_an_empty_injected_value() {
 }
 
 #[test]
+fn pi_provider_credentials_never_enter_the_terminal_environment() {
+    let secrets = HashMap::from([
+        (
+            "GOOGLE".to_owned(),
+            ManagedSecretValue::pi_provider_api_key("google", "google-key", None),
+        ),
+        (
+            "OPENAI".to_owned(),
+            ManagedSecretValue::pi_provider_api_key("openai", "openai-key", None),
+        ),
+    ]);
+
+    assert!(build_secret_env_vars(&secrets).unwrap().is_empty());
+}
+
+#[test]
 #[serial_test::serial]
 fn raw_value_only_writes_under_secret_name() {
     // TODO: Audit that the environment access only happens in single-threaded code.

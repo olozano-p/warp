@@ -93,6 +93,7 @@ pub fn build_managed_secret_value(
             ))
         }
         ManagedSecretType::RawValue
+        | ManagedSecretType::PiProviderApiKey
         | ManagedSecretType::Dotenvx
         | ManagedSecretType::DockerRegistry
         | ManagedSecretType::AwsEcrCredential => Err(anyhow!(

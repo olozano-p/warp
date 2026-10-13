@@ -723,6 +723,7 @@ pub struct AgentDriver {
     /// `build_runner` so harnesses can look up resolved secret values
     /// without re-deriving precedence.
     resolved_env_vars: Arc<HashMap<OsString, OsString>>,
+    harness_config_dir: Option<tempfile::TempDir>,
 
     output_format: OutputFormat,
 
@@ -1227,17 +1228,16 @@ impl AgentDriver {
             parent_run_id.as_deref(),
             selected_harness,
         ));
-        env_vars.extend(
-            harness_env_vars(
-                selected_harness,
-                harness_transport,
-                third_party_harness_model_config.as_ref(),
-            )
-            .map_err(|error| AgentDriverError::HarnessConfigSetupFailed {
-                harness: selected_harness.to_string(),
-                error,
-            })?,
-        );
+        let (harness_env, harness_config_dir) = harness_env_vars(
+            selected_harness,
+            harness_transport,
+            third_party_harness_model_config.as_ref(),
+        )
+        .map_err(|error| AgentDriverError::HarnessConfigSetupFailed {
+            harness: selected_harness.to_string(),
+            error,
+        })?;
+        env_vars.extend(harness_env);
         if let Some(dirs) = &workspace.factory_skill_dirs {
             env_vars.insert(
                 OsString::from(WARP_SKILL_DIRS_ENV),
@@ -1369,6 +1369,7 @@ impl AgentDriver {
             working_dir,
             secrets: Arc::new(secrets),
             resolved_env_vars,
+            harness_config_dir,
             output_format: OutputFormat::default(),
             task_id,
             use_factory_repositories,
@@ -1425,6 +1426,7 @@ impl AgentDriver {
             working_dir,
             secrets: Arc::new(HashMap::new()),
             resolved_env_vars: Arc::new(HashMap::new()),
+            harness_config_dir: None,
             output_format: OutputFormat::default(),
             task_id: None,
             use_factory_repositories: false,
@@ -1682,6 +1684,7 @@ impl AgentDriver {
                     match Self::run_until_end(task, &foreground, &background).await {
                         Ok(outcome) => outcome,
                         Err(error) => {
+                            let _ = foreground.spawn(|me, _| me.harness_config_dir.take()).await;
                             if tx.send(Err(error)).is_err() {
                                 report_error!("Caller did not wait for agent driver to finish");
                             }
@@ -1730,6 +1733,7 @@ impl AgentDriver {
                         // Keep handlers registered so a second SIGINT/SIGTERM can still
                         // emulate default terminate if snapshot/recording gets stuck.
                         Self::save_run_artifacts(&foreground, snapshot_allowed).await;
+                        let _ = foreground.spawn(|me, _| me.harness_config_dir.take()).await;
                         interrupt_watch.terminate(signal);
                     }
                     RunEndCause::Completed | RunEndCause::SandboxDeadline => {
@@ -1747,6 +1751,7 @@ impl AgentDriver {
                         }
                         let result = finished.unwrap_or(Err(AgentDriverError::InvalidRuntimeState));
                         let result = driver_result_after_harness_run(result);
+                        let _ = foreground.spawn(|me, _| me.harness_config_dir.take()).await;
                         if tx.send(result).is_err() {
                             report_error!("Caller did not wait for agent driver to finish");
                         }
@@ -5115,6 +5120,7 @@ fn typed_secret_entries(secret: &ManagedSecretValue) -> Vec<(&'static str, &str)
         ManagedSecretValue::OpenaiApiKey { api_key, .. } => {
             vec![("OPENAI_API_KEY", api_key.as_str())]
         }
+        ManagedSecretValue::PiProviderApiKey { .. } => vec![],
         // A registry credential authenticates an image pull, not the agent process, and
         // is never injected into the terminal session.
         ManagedSecretValue::DockerRegistry { .. } => vec![],

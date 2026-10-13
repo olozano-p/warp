@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
 use serde_json::{Map, Value, json};
-use tempfile::Builder;
+use tempfile::{Builder, NamedTempFile, TempDir};
 use warp_core::safe_info;
 use warp_managed_secrets::ManagedSecretValue;
 
@@ -42,15 +43,16 @@ fn seeded_extension_dir(package_dir: &Path) -> Option<PathBuf> {
     npm.is_dir().then_some(npm)
 }
 
-pub(super) fn pi_env_vars() -> Result<HashMap<OsString, OsString>> {
+pub(super) fn pi_env_vars() -> Result<(HashMap<OsString, OsString>, TempDir)> {
     let agent_dir = Builder::new().prefix("oz-pi-").tempdir()?;
+    #[cfg(unix)]
+    fs::set_permissions(agent_dir.path(), fs::Permissions::from_mode(0o700))?;
     let session_dir = agent_dir.path().join("sessions");
     fs::create_dir_all(&session_dir)?;
-    let agent_dir = agent_dir.keep();
     let mut env_vars = HashMap::from([
         (
             OsString::from(PI_CODING_AGENT_DIR_ENV),
-            agent_dir.into_os_string(),
+            agent_dir.path().as_os_str().to_owned(),
         ),
         (
             OsString::from("PI_CODING_AGENT_SESSION_DIR"),
@@ -69,7 +71,7 @@ pub(super) fn pi_env_vars() -> Result<HashMap<OsString, OsString>> {
             package_dir.into_os_string(),
         );
     }
-    Ok(env_vars)
+    Ok((env_vars, agent_dir))
 }
 
 /// The startup notice pi-acp attaches to `session/new`, when it has one. pi-acp also streams
@@ -100,13 +102,9 @@ pub(super) fn prepare_pi_environment_config(
         && !config
             .model_id
             .split_once('/')
-            .is_some_and(|(provider, model)| {
-                matches!(provider, "anthropic" | "openai") && !model.is_empty()
-            })
+            .is_some_and(|(provider, model)| valid_provider_id(provider) && !model.is_empty())
     {
-        return Err(anyhow!(
-            "Pi models must use anthropic/model or openai/model"
-        ));
+        return Err(anyhow!("Pi models must use provider/model"));
     }
     let agent_dir = resolved_env_vars
         .get(OsStr::new(PI_CODING_AGENT_DIR_ENV))
@@ -133,18 +131,57 @@ pub(super) fn prepare_pi_environment_config(
         &pi_mcp_config(resolved_mcp_servers),
         "Failed to serialize Pi MCP configuration",
     )?;
-    let mut providers = Map::new();
+    prepare_pi_credentials(&agent_dir, resolved_env_vars, resolved_secrets)?;
+    Ok(agent_dir)
+}
 
-    // TODO: Generalize Pi authentication beyond the existing Anthropic/OpenAI secret types.
+fn valid_provider_id(provider: &str) -> bool {
+    !provider.is_empty()
+        && provider.len() <= 128
+        && !matches!(provider, "__proto__" | "constructor" | "prototype")
+        && provider.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
+}
+
+fn prepare_pi_credentials(
+    agent_dir: &Path,
+    resolved_env_vars: &HashMap<OsString, OsString>,
+    resolved_secrets: &HashMap<String, ManagedSecretValue>,
+) -> Result<()> {
+    let mut credentials = HashMap::new();
     for secret in resolved_secrets.values() {
-        let ManagedSecretValue::OpenaiApiKey {
+        if let ManagedSecretValue::PiProviderApiKey {
+            provider_id,
             api_key,
-            base_url: Some(base_url),
+            base_url,
         } = secret
-        else {
-            continue;
+        {
+            if !valid_provider_id(provider_id) || api_key.is_empty() {
+                return Err(anyhow!("Invalid Pi provider API key credential"));
+            }
+            let credential = (api_key.as_str(), base_url.as_deref());
+            if credentials
+                .insert(provider_id.as_str(), credential)
+                .is_some_and(|previous| previous != credential)
+            {
+                return Err(anyhow!("Conflicting Pi credentials for the same provider"));
+            }
+        }
+    }
+    for secret in resolved_secrets.values() {
+        let (provider, env_name, api_key, base_url) = match secret {
+            ManagedSecretValue::AnthropicApiKey { api_key } => {
+                ("anthropic", "ANTHROPIC_API_KEY", api_key, None)
+            }
+            ManagedSecretValue::OpenaiApiKey { api_key, base_url } => {
+                ("openai", "OPENAI_API_KEY", api_key, base_url.as_deref())
+            }
+            _ => continue,
         };
-        let env_name = "OPENAI_API_KEY";
+        if credentials.contains_key(provider) {
+            continue;
+        }
         let active_key = std::env::var(env_name)
             .ok()
             .filter(|value| !value.is_empty())
@@ -154,19 +191,41 @@ pub(super) fn prepare_pi_environment_config(
                     .and_then(|value| value.to_str())
                     .map(str::to_owned)
             });
-        if active_key.as_deref() != Some(api_key.as_str()) {
-            continue;
+        if active_key.as_deref() == Some(api_key.as_str()) {
+            credentials.insert(provider, (api_key.as_str(), base_url));
         }
-        providers.insert("openai".to_owned(), json!({"baseUrl": base_url}));
     }
+    let mut auth = Map::new();
+    let mut providers = Map::new();
+    for (provider, (api_key, base_url)) in credentials {
+        // Pi interprets !commands and $variables in keys; managed values must stay literal.
+        let key = api_key.replace('$', "$$");
+        let key = if let Some(command) = key.strip_prefix('!') {
+            format!("$!{command}")
+        } else {
+            key
+        };
+        auth.insert(provider.to_owned(), json!({"type": "api_key", "key": key}));
+        if let Some(base_url) = base_url {
+            providers.insert(provider.to_owned(), json!({"baseUrl": base_url}));
+        }
+    }
+    write_private_pi_json(agent_dir, "auth.json", &Value::Object(auth))?;
     if !providers.is_empty() {
-        write_json_file(
-            &agent_dir.join("models.json"),
-            &json!({"providers": providers}),
-            "Failed to serialize Pi model endpoint overrides",
-        )?;
+        write_private_pi_json(agent_dir, "models.json", &json!({"providers": providers}))?;
     }
-    Ok(agent_dir)
+    Ok(())
+}
+
+fn write_private_pi_json(agent_dir: &Path, name: &str, value: &Value) -> Result<()> {
+    let mut file =
+        NamedTempFile::new_in(agent_dir).context("Failed to create Pi credential file")?;
+    serde_json::to_writer(&mut file, value).context("Failed to serialize Pi credentials")?;
+    file.flush().context("Failed to flush Pi credentials")?;
+    file.persist(agent_dir.join(name))
+        .map_err(|error| error.error)
+        .context("Failed to persist Pi credentials")?;
+    Ok(())
 }
 
 /// Publishes configured and bundled skills under `<agent_dir>/skills`, Pi's agent-level skill

@@ -1115,11 +1115,13 @@ impl AmbientAgentViewModel {
                         claude_auth_secret_name: Some(name.clone()),
                         codex_auth_secret_name: None,
                         pi_auth_secret_name: None,
+                        pi_provider_auth_secrets: None,
                     }),
                     Harness::Codex => Some(HarnessAuthSecretsConfig {
                         claude_auth_secret_name: None,
                         codex_auth_secret_name: Some(name.clone()),
                         pi_auth_secret_name: None,
+                        pi_provider_auth_secrets: None,
                     }),
                     Harness::Oz
                     | Harness::OpenCode

@@ -135,6 +135,8 @@ pub struct HarnessAuthSecretsConfig {
     pub codex_auth_secret_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pi_auth_secret_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pi_provider_auth_secrets: Option<Box<HashMap<String, String>>>,
 }
 
 impl AgentConfigSnapshot {

@@ -2,6 +2,48 @@ use super::*;
 use crate::cloud_environment::CodeForge;
 
 #[test]
+fn pi_provider_bindings_preserve_omitted_and_explicit_empty_maps() {
+    let omitted: HarnessAuthSecretsConfig = serde_json::from_value(serde_json::json!({
+        "pi_auth_secret_name": "LEGACY"
+    }))
+    .unwrap();
+    assert!(omitted.pi_provider_auth_secrets.is_none());
+    assert_eq!(
+        serde_json::to_value(omitted).unwrap(),
+        serde_json::json!({
+            "pi_auth_secret_name": "LEGACY"
+        })
+    );
+
+    let cleared: HarnessAuthSecretsConfig = serde_json::from_value(serde_json::json!({
+        "pi_provider_auth_secrets": {}
+    }))
+    .unwrap();
+    assert!(
+        cleared
+            .pi_provider_auth_secrets
+            .as_ref()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        serde_json::to_value(cleared).unwrap(),
+        serde_json::json!({
+            "pi_provider_auth_secrets": {}
+        })
+    );
+}
+
+#[test]
+fn pi_provider_bindings_round_trip_distinct_keys() {
+    let json = serde_json::json!({
+        "pi_provider_auth_secrets": {"google": "GOOGLE", "openai": "OPENAI"}
+    });
+    let config: HarnessAuthSecretsConfig = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(config).unwrap(), json);
+}
+
+#[test]
 fn additional_source_repos_round_trip_and_is_optional() {
     let snapshot = AgentConfigSnapshot {
         additional_source_repos: Some(vec![SourceRepo::new(

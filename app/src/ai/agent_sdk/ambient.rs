@@ -489,6 +489,7 @@ impl AmbientAgentRunner {
                 claude_auth_secret_name: args.claude_auth_secret.clone(),
                 codex_auth_secret_name: args.codex_auth_secret.clone(),
                 pi_auth_secret_name: None,
+                pi_provider_auth_secrets: None,
             });
 
             let merged_config = super::config_file::merge_with_precedence(
