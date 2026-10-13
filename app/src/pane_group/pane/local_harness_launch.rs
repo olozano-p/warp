@@ -287,6 +287,7 @@ pub(super) async fn prepare_local_harness_child_launch(
             harness,
             HarnessTransport::Pty,
             harness_model_config.as_ref(),
+            &env_vars,
         )
         .map_err(|error| error.to_string())?,
     );

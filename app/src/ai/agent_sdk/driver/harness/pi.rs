@@ -18,21 +18,18 @@ use crate::ai::ambient_agents::task::HarnessModelConfig;
 use crate::ai::mcp::JSONTransportType;
 
 const PI_PACKAGE_DIR_ENV: &str = "PI_PACKAGE_DIR";
-const SIDECAR_PI_PACKAGE_DIR: &str = "/mnt/pi-cli-sidecar/usr/local/lib/pi-packages";
 /// Pinned to the version baked into the sidecar image so native installs resolve the same
 /// adapter the seeded extension tree carries.
 const PI_MCP_ADAPTER_PACKAGE: &str = "npm:pi-mcp-adapter@5.2.0";
 pub(super) const PI_CODING_AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 
-/// Pi's installation assets root, when a run supplies one: a process-level `PI_PACKAGE_DIR`,
-/// otherwise the sidecar mount if present. A native Pi install needs neither and locates its own
-/// assets.
-fn pi_package_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os(PI_PACKAGE_DIR_ENV).filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    let sidecar = PathBuf::from(SIDECAR_PI_PACKAGE_DIR);
-    sidecar.is_dir().then_some(sidecar)
+/// Pi's installation assets root from the process or resolved manifest environment. A native
+/// installation can locate its own assets when neither provides a directory.
+fn pi_package_dir(resolved_env_vars: &HashMap<OsString, OsString>) -> Option<PathBuf> {
+    std::env::var_os(PI_PACKAGE_DIR_ENV)
+        .or_else(|| resolved_env_vars.get(OsStr::new(PI_PACKAGE_DIR_ENV)).cloned())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The pre-installed extension tree under a package dir, when the adapter was baked in ahead of
@@ -42,7 +39,9 @@ fn seeded_extension_dir(package_dir: &Path) -> Option<PathBuf> {
     npm.is_dir().then_some(npm)
 }
 
-pub(super) fn pi_env_vars() -> Result<HashMap<OsString, OsString>> {
+pub(super) fn pi_env_vars(
+    resolved_env_vars: &HashMap<OsString, OsString>,
+) -> Result<HashMap<OsString, OsString>> {
     let agent_dir = Builder::new().prefix("oz-pi-").tempdir()?;
     let session_dir = agent_dir.path().join("sessions");
     fs::create_dir_all(&session_dir)?;
@@ -58,7 +57,7 @@ pub(super) fn pi_env_vars() -> Result<HashMap<OsString, OsString>> {
         ),
         (OsString::from("PI_SKIP_VERSION_CHECK"), OsString::from("1")),
     ]);
-    if let Some(package_dir) = pi_package_dir() {
+    if let Some(package_dir) = pi_package_dir(resolved_env_vars) {
         // Offline mode also stops Pi from installing missing packages, so it is only safe once
         // the adapter is known to be seeded from the package dir.
         if seeded_extension_dir(&package_dir).is_some() {

@@ -15,8 +15,10 @@ use crate::ai::mcp::JSONMCPServer;
 
 #[test]
 fn environment_allocates_isolated_session_directories() {
-    let first = harness_env_vars(Harness::Pi, HarnessTransport::Acp, None).unwrap();
-    let second = harness_env_vars(Harness::Pi, HarnessTransport::Acp, None).unwrap();
+    let first =
+        harness_env_vars(Harness::Pi, HarnessTransport::Acp, None, &HashMap::new()).unwrap();
+    let second =
+        harness_env_vars(Harness::Pi, HarnessTransport::Acp, None, &HashMap::new()).unwrap();
     let first_agent_dir = PathBuf::from(&first[OsStr::new(PI_CODING_AGENT_DIR_ENV)]);
     let second_agent_dir = PathBuf::from(&second[OsStr::new(PI_CODING_AGENT_DIR_ENV)]);
     let first_session_dir = PathBuf::from(&first[OsStr::new("PI_CODING_AGENT_SESSION_DIR")]);

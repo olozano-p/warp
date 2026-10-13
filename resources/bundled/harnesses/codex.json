@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "harness": "codex",
+  "acp": {
+    "program": "codex-acp",
+    "args": []
+  },
+  "install_docs_url": "https://developers.openai.com/codex/cli",
+  "auth": {
+    "check_command": "codex login status",
+    "runtime_error_patterns": [
+      "Quota exceeded. Check your plan and billing details.",
+      "You've hit your usage limit",
+      "unexpected status 401",
+      "Incorrect API key provided",
+      "invalid API key",
+      "Access blocked by Cloudflare",
+      "could not be refreshed",
+      "\"type\": \"invalid_request_error\""
+    ]
+  }
+}

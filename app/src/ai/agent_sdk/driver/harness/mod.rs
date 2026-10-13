@@ -56,7 +56,7 @@ mod skill_dirs_publish;
 mod telemetry;
 mod transcript_persistence;
 mod usage_reporting;
-pub(crate) use acp::{AcpHarness, AcpLaunchSpec};
+use acp::AcpHarness;
 pub(crate) use claude_code::ClaudeHarness;
 use claude_transcript::ClaudeResumeInfo;
 use codex::CodexHarness;
@@ -154,7 +154,7 @@ pub(crate) trait ThirdPartyHarness: Send + Sync {
 
     /// URL to install instructions for this harness's CLI, surfaced in the
     /// default [`validate`] impl when the CLI is not on `PATH`.
-    fn install_docs_url(&self) -> Option<&'static str> {
+    fn install_docs_url(&self) -> Option<&str> {
         None
     }
 
@@ -177,6 +177,17 @@ pub(crate) trait ThirdPartyHarness: Send + Sync {
     /// machinery used by the find feature.
     fn runtime_error_patterns(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    fn runtime_error_patterns_for_run(&self) -> Vec<String> {
+        self.runtime_error_patterns()
+            .iter()
+            .map(|pattern| (*pattern).to_owned())
+            .collect()
+    }
+
+    fn env_defaults(&self) -> Option<&HashMap<OsString, OsString>> {
+        None
     }
 
     /// Whether this harness must verify its Oz platform plugin before launch.
@@ -267,6 +278,13 @@ pub(crate) enum HarnessKind {
 }
 
 impl HarnessKind {
+    pub(super) fn env_defaults(&self) -> HashMap<OsString, OsString> {
+        match self {
+            HarnessKind::ThirdParty(harness) => harness.env_defaults().cloned().unwrap_or_default(),
+            HarnessKind::Oz | HarnessKind::Unsupported(_) => HashMap::new(),
+        }
+    }
+
     pub(crate) fn set_initial_attachments(&mut self, downloaded: Vec<DownloadedAttachment>) {
         if let Self::ThirdParty(harness) = self {
             harness.set_initial_attachments(downloaded);
@@ -346,17 +364,18 @@ pub(crate) fn harness_kind(
     }
 }
 
-/// Resolves the ACP launch for `harness`, failing when the launch table has no entry for it.
 fn acp_harness_kind(harness: Harness) -> Result<HarnessKind, AgentDriverError> {
-    let Some(launch) = AcpLaunchSpec::for_harness(harness) else {
-        return Err(AgentDriverError::HarnessSetupFailed {
-            harness: harness.to_string(),
-            reason: format!("The {harness} harness cannot be driven over ACP."),
-        });
-    };
-    Ok(HarnessKind::ThirdParty(Box::new(AcpHarness::new(
-        harness, launch,
-    ))))
+    match harness {
+        Harness::Claude | Harness::Codex | Harness::Gemini | Harness::Pi => {
+            Ok(HarnessKind::ThirdParty(Box::new(AcpHarness::new(harness)?)))
+        }
+        Harness::Oz | Harness::OpenCode | Harness::Unknown => {
+            Err(AgentDriverError::HarnessSetupFailed {
+                harness: harness.to_string(),
+                reason: format!("The {harness} harness cannot be driven over ACP."),
+            })
+        }
+    }
 }
 
 /// Returns the harness's auth-check preflight command, if any.
@@ -556,6 +575,7 @@ pub(crate) fn harness_env_vars(
     selected_harness: Harness,
     transport: HarnessTransport,
     third_party_harness_model_config: Option<&HarnessModelConfig>,
+    resolved_env_vars: &HashMap<OsString, OsString>,
 ) -> Result<HashMap<OsString, OsString>> {
     let mut env_vars = HashMap::new();
 
@@ -568,7 +588,7 @@ pub(crate) fn harness_env_vars(
                 env_vars.insert(OsString::from("ANTHROPIC_MODEL"), OsString::from(model_id));
             }
         }
-        (Harness::Pi, _) => return pi_env_vars(),
+        (Harness::Pi, _) => return pi_env_vars(resolved_env_vars),
         (Harness::Claude, HarnessTransport::Acp)
         | (
             Harness::Oz | Harness::OpenCode | Harness::Gemini | Harness::Codex | Harness::Unknown,
