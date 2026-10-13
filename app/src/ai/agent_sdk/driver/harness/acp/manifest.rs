@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf, absolute};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde::Deserialize;
+use typed_path::{WindowsComponent, WindowsPath};
 use warp_cli::agent::Harness;
 use warp_core::paths::bundled_resources_dir;
 use warp_util::path::file_exists_and_is_executable;
@@ -104,7 +105,7 @@ fn discover(
         manifest.acp.program = resolve_sidecar_program(&dir, &manifest.acp.program)
             .with_context(|| format!("Invalid ACP program in {}", path.display()))?;
     }
-    let env = resolve_env(&manifest.env, &dir, std::env::vars_os().collect());
+    let env = resolve_env(&manifest.env, &dir);
     log::info!("Selected ACP manifest for {harness}: {}", path.display());
     Ok(ResolvedManifest {
         launch: manifest.acp,
@@ -139,7 +140,11 @@ fn read_manifest(path: &Path, harness: Harness) -> Result<Manifest> {
 }
 
 fn resolve_sidecar_program(dir: &Path, program: &str) -> Result<String> {
-    if program.is_empty() || program.contains(['/', '\\']) || matches!(program, "." | "..") {
+    let mut components = WindowsPath::new(program).components();
+    if program.contains(['/', '\\'])
+        || !matches!(components.next(), Some(WindowsComponent::Normal(_)))
+        || components.next().is_some()
+    {
         bail!("Sidecar ACP program must be a bare filename, got {program:?}");
     }
     let path = dir.join("usr/local/bin").join(program);
@@ -163,26 +168,19 @@ fn resolve_sidecar_program(dir: &Path, program: &str) -> Result<String> {
         .map_err(|_| anyhow!("Sidecar ACP executable path is not valid UTF-8"))
 }
 
-fn resolve_env(
-    env: &HashMap<String, String>,
-    dir: &Path,
-    process_env: HashMap<OsString, OsString>,
-) -> HashMap<OsString, OsString> {
+fn resolve_env(env: &HashMap<String, String>, dir: &Path) -> HashMap<OsString, OsString> {
     env.iter()
         .map(|(name, value)| {
-            let resolved = process_env
-                .get(OsStr::new(name))
-                .cloned()
-                .unwrap_or_else(|| {
-                    let mut resolved = OsString::new();
-                    let mut parts = value.split(MANIFEST_DIR);
-                    resolved.push(parts.next().unwrap_or_default());
-                    for part in parts {
-                        resolved.push(dir);
-                        resolved.push(part);
-                    }
-                    resolved
-                });
+            let resolved = std::env::var_os(name).unwrap_or_else(|| {
+                let mut resolved = OsString::new();
+                let mut parts = value.split(MANIFEST_DIR);
+                resolved.push(parts.next().unwrap_or_default());
+                for part in parts {
+                    resolved.push(dir);
+                    resolved.push(part);
+                }
+                resolved
+            });
             (OsString::from(name), resolved)
         })
         .collect()

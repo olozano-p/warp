@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
+use command::blocking::Command as ProcessCommand;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 use warp_cli::agent::Harness;
@@ -133,7 +133,7 @@ fn sidecar_program_requires_an_executable_under_usr_local_bin() {
         Path::new(&resolve_sidecar_program(root.path(), PROGRAM).unwrap()),
         executable
     );
-    for program in ["/adapter", "../adapter", r"bin\adapter"] {
+    for program in ["/adapter", "../adapter", r"bin\adapter", "C:adapter.exe"] {
         assert!(
             resolve_sidecar_program(root.path(), program)
                 .unwrap_err()
@@ -145,6 +145,32 @@ fn sidecar_program_requires_an_executable_under_usr_local_bin() {
 
 #[test]
 fn manifest_directory_substitution_is_env_only_and_process_values_win() {
+    if std::env::var_os("WARP_TEST_MANIFEST_ENV").is_none() {
+        let mut command = ProcessCommand::new(std::env::current_exe().unwrap());
+        #[cfg(windows)]
+        command.creation_flags(0);
+        let output = command
+            .args([
+                "--exact",
+                "ai::agent_sdk::driver::harness::acp::manifest::tests::manifest_directory_substitution_is_env_only_and_process_values_win",
+                "--nocapture",
+            ])
+            .env("WARP_TEST_MANIFEST_ENV", "1")
+            .env_remove("PI_PACKAGE_DIR")
+            .env_remove("LITERAL")
+            .env_remove("CODEX_HOME")
+            .env("codex_home", "process-codex-home")
+            .env("WARP_MANIFEST_OVERRIDE", "process-package-dir")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
     let root = tempdir().unwrap();
     let resources = root.path().join("resources");
     let path = resources.join("bundled/harnesses/pi.json");
@@ -152,27 +178,32 @@ fn manifest_directory_substitution_is_env_only_and_process_values_win() {
     let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     manifest["env"] = json!({
         "PI_PACKAGE_DIR": "${MANIFEST_DIR}/usr/local/lib/pi-packages",
-        "LITERAL": "${OTHER}"
+        "LITERAL": "${OTHER}",
+        "WARP_MANIFEST_OVERRIDE": "manifest-package-dir",
+        "CODEX_HOME": "manifest-codex-home"
     });
     fs::write(&path, manifest.to_string()).unwrap();
     let manifest = read_manifest(&path, Harness::Pi).unwrap();
     let dir = path.parent().unwrap();
-    let env = resolve_env(&manifest.env, dir, HashMap::new());
+    let env = resolve_env(&manifest.env, dir);
     assert_eq!(
         PathBuf::from(&env[OsStr::new("PI_PACKAGE_DIR")]),
         dir.join("usr/local/lib/pi-packages")
     );
     assert_eq!(env[OsStr::new("LITERAL")], "${OTHER}");
     assert_eq!(manifest.acp.args, ["${MANIFEST_DIR}"]);
-    let env = resolve_env(
-        &manifest.env,
-        dir,
-        HashMap::from([(
-            OsString::from("PI_PACKAGE_DIR"),
-            OsString::from("process-package-dir"),
-        )]),
+    assert_eq!(
+        env[OsStr::new("WARP_MANIFEST_OVERRIDE")],
+        "process-package-dir"
     );
-    assert_eq!(env[OsStr::new("PI_PACKAGE_DIR")], "process-package-dir");
+    assert_eq!(
+        env[OsStr::new("CODEX_HOME")],
+        if cfg!(windows) {
+            "process-codex-home"
+        } else {
+            "manifest-codex-home"
+        }
+    );
 }
 
 #[test]
