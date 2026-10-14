@@ -111,14 +111,14 @@ mod failure_output;
 pub(crate) mod git_credentials;
 pub(crate) mod harness;
 mod harness_output_monitor;
-mod mcp_startup;
+pub(crate) mod mcp_startup;
 pub(super) mod output;
 mod snapshot;
 pub(crate) mod terminal;
 mod termination;
 
 use environment::PrepareEnvironmentError;
-use mcp_startup::MCP_SERVER_STARTUP_TIMEOUT;
+pub(crate) use mcp_startup::MCP_SERVER_STARTUP_TIMEOUT;
 pub(crate) use snapshot::upload_snapshot_for_handoff;
 use terminal::TerminalDriverEvent;
 use termination::{Interrupt, InterruptWatch, RunEndCause};
@@ -2089,12 +2089,14 @@ impl AgentDriver {
                 let managed_mcp_client = foreground
                     .spawn(|_, ctx| ServerApiProvider::as_ref(ctx).get_managed_mcp_client())
                     .await?;
+                let task_id = foreground.spawn(|me, _| me.task_id).await?;
                 let mcp_startup_result = setup_events
                     .record_result(
                         SetupStep::McpServerStartup,
-                        Self::start_task_and_profile_mcp_servers(
+                        mcp_startup::start_task_and_profile_mcp_servers(
                             &task.mcp_specs,
                             managed_mcp_client,
+                            task_id,
                             &foreground,
                         ),
                     )
