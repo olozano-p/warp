@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::PathBuf;
 
@@ -8,8 +8,8 @@ use warp_cli::agent::{Harness, HarnessTransport};
 
 use super::super::harness_env_vars;
 use super::{
-    PI_CODING_AGENT_DIR_ENV, pi_mcp_config, prepare_pi_settings, prepare_pi_system_prompt,
-    publish_skills_for_pi,
+    PI_CODING_AGENT_DIR_ENV, pi_env_vars, pi_mcp_config, prepare_pi_settings,
+    prepare_pi_system_prompt, publish_skills_for_pi,
 };
 use crate::ai::mcp::JSONMCPServer;
 
@@ -32,6 +32,24 @@ fn environment_allocates_isolated_session_directories() {
 
     fs::remove_dir_all(first_agent_dir).unwrap();
     fs::remove_dir_all(second_agent_dir).unwrap();
+}
+
+#[test]
+fn sidecar_package_dir_enables_offline_mode_when_seeded() {
+    let dir = tempfile::tempdir().unwrap();
+    let package_dir = dir.path().join("packages");
+    fs::create_dir(&package_dir).unwrap();
+    fs::create_dir(package_dir.join("npm")).unwrap();
+    let resolved_env = HashMap::from([(
+        OsString::from("PI_PACKAGE_DIR"),
+        package_dir.clone().into_os_string(),
+    )]);
+
+    let env = pi_env_vars(&resolved_env).unwrap();
+
+    assert_eq!(env[OsStr::new("PI_PACKAGE_DIR")], package_dir.as_os_str());
+    assert_eq!(env[OsStr::new("PI_OFFLINE")], "1");
+    fs::remove_dir_all(&env[OsStr::new(PI_CODING_AGENT_DIR_ENV)]).unwrap();
 }
 
 #[test]
