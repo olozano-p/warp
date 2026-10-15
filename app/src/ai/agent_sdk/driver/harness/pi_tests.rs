@@ -13,6 +13,32 @@ use super::{
 };
 use crate::ai::mcp::JSONMCPServer;
 
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn remove(key: &'static str) -> Self {
+        let original = std::env::var_os(key);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(key) };
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(original) = &self.original {
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(self.key, original) };
+        } else {
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
 #[test]
 fn environment_allocates_isolated_session_directories() {
     let first =
@@ -35,7 +61,9 @@ fn environment_allocates_isolated_session_directories() {
 }
 
 #[test]
+#[serial_test::serial]
 fn sidecar_package_dir_enables_offline_mode_when_seeded() {
+    let _package_dir_env = EnvVarGuard::remove("PI_PACKAGE_DIR");
     let dir = tempfile::tempdir().unwrap();
     let package_dir = dir.path().join("packages");
     fs::create_dir(&package_dir).unwrap();
