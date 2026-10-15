@@ -20,8 +20,9 @@ const SIDECAR_ENV: &str = "WARP_HARNESS_SIDECAR";
 const MANIFEST_FILE: &str = "warp-harness.json";
 const MANIFEST_DIR: &str = "${MANIFEST_DIR}";
 
+/// Unknown top-level sections are ignored so a sidecar can add ones for other transports
+/// without breaking clients that only know about ACP; the sections consumed here are strict.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Manifest {
     schema_version: u32,
     harness: String,
@@ -40,8 +41,9 @@ struct Auth {
     runtime_error_patterns: Vec<String>,
 }
 
-/// What a harness's sidecar declares about it, with paths and environment resolved against the
-/// manifest's location, or the built-in defaults for a natively installed harness.
+/// How to launch and check a harness over ACP: either what its sidecar's `warp-harness.json`
+/// declares, with paths and environment resolved against the manifest's location, or the
+/// built-in defaults used when there is no sidecar and the adapter is expected on `PATH`.
 pub(super) struct HarnessManifest {
     pub(super) launch: AcpLaunchSpec,
     pub(super) auth_check_command: Option<String>,
@@ -98,8 +100,8 @@ fn discover(
     })
 }
 
-/// The ACP adapter shipped alongside a natively installed harness CLI, resolved on `PATH`, with
-/// the auth knowledge the terminal transport for the same harness already carries.
+/// Launch and auth details for a harness with no sidecar: the ACP adapter is resolved on
+/// `PATH`, and the auth knowledge comes from the terminal transport for the same harness.
 fn default_manifest(harness: Harness) -> Option<HarnessManifest> {
     let (program, args, pty): (&str, &[&str], Option<&dyn ThirdPartyHarness>) = match harness {
         Harness::Claude => ("claude-code-acp", &[], Some(&ClaudeHarness)),

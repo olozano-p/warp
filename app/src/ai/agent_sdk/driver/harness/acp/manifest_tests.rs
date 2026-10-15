@@ -182,7 +182,7 @@ fn manifest_directory_substitution_is_env_only_and_process_values_win() {
 }
 
 #[test]
-fn unsupported_versions_and_unknown_fields_are_rejected() {
+fn unsupported_versions_and_unknown_section_fields_are_rejected() {
     let root = tempdir().unwrap();
     let path = root.path().join(MANIFEST_FILE);
     write_manifest(&path, &[]);
@@ -196,13 +196,15 @@ fn unsupported_versions_and_unknown_fields_are_rejected() {
             .to_string()
             .contains("unsupported schema_version")
     );
-    let mut top_level = valid.clone();
-    top_level["unknown"] = json!(true);
+    let mut future_section = valid.clone();
+    future_section["tui"] = json!({"program": "pi"});
+    fs::write(&path, future_section.to_string()).unwrap();
+    assert!(read_manifest(&path, Harness::Pi).is_ok());
     let mut acp = valid.clone();
     acp["acp"]["unknown"] = json!(true);
     let mut auth = valid;
     auth["auth"] = json!({"unknown": true});
-    for invalid in [top_level, acp, auth] {
+    for invalid in [acp, auth] {
         fs::write(&path, invalid.to_string()).unwrap();
         assert!(
             format!("{:#}", read_manifest(&path, Harness::Pi).unwrap_err())
