@@ -54,7 +54,7 @@ fn discovery_selects_override_then_mount_then_bundle_without_merging() {
     let mut bundle: Value =
         serde_json::from_slice(&fs::read(resources.join("bundled/harnesses/pi.json")).unwrap())
             .unwrap();
-    bundle["install_docs_url"] = json!("https://example.test/install");
+    bundle["auth"] = json!({"check_command": "bundle-only"});
     fs::write(
         resources.join("bundled/harnesses/pi.json"),
         bundle.to_string(),
@@ -67,14 +67,15 @@ fn discovery_selects_override_then_mount_then_bundle_without_merging() {
         Path::new(&selected.launch.program),
         override_dir.join("usr/local/bin").join(PROGRAM)
     );
-    assert!(selected.install_docs_url.is_none());
+    assert!(selected.auth_check_command.is_none());
     let selected = discover(Harness::Pi, None, &mounts, Some(&resources)).unwrap();
     assert_eq!(selected.launch.args, ["mount"]);
-    assert!(selected.install_docs_url.is_none());
+    assert!(selected.auth_check_command.is_none());
     fs::remove_file(mount_manifest).unwrap();
     let selected = discover(Harness::Pi, None, &mounts, Some(&resources)).unwrap();
     assert_eq!(selected.launch.args, ["bundle"]);
     assert_eq!(selected.launch.program, PROGRAM);
+    assert_eq!(selected.auth_check_command.as_deref(), Some("bundle-only"));
     assert!(!selected.is_sidecar);
 }
 

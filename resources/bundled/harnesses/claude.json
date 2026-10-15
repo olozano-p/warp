@@ -5,7 +5,6 @@
     "program": "claude-code-acp",
     "args": []
   },
-  "install_docs_url": "https://code.claude.com/docs/en/quickstart",
   "auth": {
     "check_command": "claude auth status --json",
     "runtime_error_patterns": [

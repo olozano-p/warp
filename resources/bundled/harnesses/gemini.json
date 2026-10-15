@@ -4,6 +4,5 @@
   "acp": {
     "program": "gemini",
     "args": ["--experimental-acp"]
-  },
-  "install_docs_url": "https://geminicli.com/"
+  }
 }

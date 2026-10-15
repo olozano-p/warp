@@ -154,7 +154,7 @@ pub(crate) trait ThirdPartyHarness: Send + Sync {
 
     /// URL to install instructions for this harness's CLI, surfaced in the
     /// default [`validate`] impl when the CLI is not on `PATH`.
-    fn install_docs_url(&self) -> Option<&str> {
+    fn install_docs_url(&self) -> Option<&'static str> {
         None
     }
 
@@ -375,6 +375,16 @@ fn acp_harness_kind(harness: Harness) -> Result<HarnessKind, AgentDriverError> {
                 reason: format!("The {harness} harness cannot be driven over ACP."),
             })
         }
+    }
+}
+
+/// URL to install instructions for the harness's CLI.
+fn install_docs_url(harness: Harness) -> Option<&'static str> {
+    match harness {
+        Harness::Claude => Some("https://code.claude.com/docs/en/quickstart"),
+        Harness::Codex => Some("https://developers.openai.com/codex/cli"),
+        Harness::Gemini => Some("https://geminicli.com/"),
+        Harness::Pi | Harness::Oz | Harness::OpenCode | Harness::Unknown => None,
     }
 }
 

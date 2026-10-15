@@ -23,7 +23,6 @@ struct Manifest {
     schema_version: u32,
     harness: String,
     acp: AcpLaunchSpec,
-    install_docs_url: Option<String>,
     #[serde(default)]
     auth: Auth,
     #[serde(default)]
@@ -38,16 +37,17 @@ struct Auth {
     runtime_error_patterns: Vec<String>,
 }
 
-pub(super) struct ResolvedManifest {
+/// What a harness's sidecar or bundle declares about it, with paths and environment resolved
+/// against the manifest's location.
+pub(super) struct HarnessManifest {
     pub(super) launch: AcpLaunchSpec,
-    pub(super) install_docs_url: Option<String>,
     pub(super) auth_check_command: Option<String>,
     pub(super) runtime_error_patterns: Vec<String>,
     pub(super) env: HashMap<OsString, OsString>,
     pub(super) is_sidecar: bool,
 }
 
-pub(super) fn resolve(harness: Harness) -> Result<ResolvedManifest, AgentDriverError> {
+pub(super) fn resolve(harness: Harness) -> Result<HarnessManifest, AgentDriverError> {
     let override_dir = std::env::var_os(SIDECAR_ENV).map(PathBuf::from);
     discover(
         harness,
@@ -66,7 +66,7 @@ fn discover(
     override_dir: Option<&Path>,
     mounts_dir: &Path,
     resources_dir: Option<&Path>,
-) -> Result<ResolvedManifest> {
+) -> Result<HarnessManifest> {
     let mount_path = mounts_dir
         .join(format!("{harness}-cli-sidecar"))
         .join(MANIFEST_FILE);
@@ -107,9 +107,8 @@ fn discover(
     }
     let env = resolve_env(&manifest.env, &dir);
     log::info!("Selected ACP manifest for {harness}: {}", path.display());
-    Ok(ResolvedManifest {
+    Ok(HarnessManifest {
         launch: manifest.acp,
-        install_docs_url: manifest.install_docs_url,
         auth_check_command: manifest.auth.check_command,
         runtime_error_patterns: manifest.auth.runtime_error_patterns,
         env,

@@ -2510,6 +2510,10 @@ fn deferred_repository_semantic_acp_consumes_server_resolved_text_once() {
             .env("HOME", home.path())
             .env("USERPROFILE", home.path())
             .env("CODEX_HOME", home.path().join(".codex"))
+            .env(
+                "WARP_HARNESS_SIDECAR",
+                crate::ai::agent_sdk::tests::harness_sidecar_fixture(home.path(), Harness::Codex),
+            )
             .env("WARP_ISOLATION_PLATFORM", "docker")
             .env("WARP_WORKLOAD_TOKEN", "test-workload-token")
             .output()
@@ -2538,11 +2542,10 @@ fn deferred_repository_semantic_acp_consumes_server_resolved_text_once() {
         options.working_dir = root.path().to_path_buf();
         options.selected_harness = Harness::Codex;
         options.harness_transport = HarnessTransport::Acp;
-        let driver = app.add_model(|ctx| AgentDriver::new(options, ctx).unwrap());
+        let harness = harness_kind(Harness::Codex, HarnessTransport::Acp).unwrap();
+        let driver = app.add_model(|ctx| AgentDriver::new(options, &harness, ctx).unwrap());
         let foreground = driver.update(&mut app, |_, ctx| ctx.spawner());
-        let HarnessKind::ThirdParty(harness) =
-            harness_kind(Harness::Codex, HarnessTransport::Acp).unwrap()
-        else {
+        let HarnessKind::ThirdParty(harness) = harness else {
             panic!("expected an ACP harness");
         };
         let runner = AgentDriver::prepare_harness(
@@ -2658,7 +2661,13 @@ fn deferred_repository_semantic_skill_publication_without_initial_inventory() {
                             ManagedSecretValue::raw_value("1"),
                         );
                     }
-                    let harness = harness_kind(harness, transport).unwrap();
+                    let sidecar_root = TempDir::new().unwrap();
+                    let harness = crate::ai::agent_sdk::tests::with_harness_sidecar(
+                        sidecar_root.path(),
+                        harness,
+                        || harness_kind(harness, transport),
+                    )
+                    .unwrap();
                     let driver =
                         app.add_model(|ctx| AgentDriver::new(options, &harness, ctx).unwrap());
                     let foreground = driver.update(&mut app, |driver, ctx| {
@@ -2727,7 +2736,7 @@ fn deferred_repository_runtime_exports_absolute_root_before_terminal_creation() 
             "WARP_WORKSPACE_ROOT".into(),
             ManagedSecretValue::raw_value("/other/root"),
         );
-        let driver = app.add_model(|ctx| AgentDriver::new(options, ctx).unwrap());
+        let driver = app.add_model(|ctx| AgentDriver::new(options, &HarnessKind::Oz, ctx).unwrap());
         driver.update(&mut app, |driver, ctx| {
             for name in ["OZ_WORKSPACE_ROOT", "WARP_WORKSPACE_ROOT"] {
                 assert_eq!(
@@ -2762,7 +2771,7 @@ fn deferred_repository_runtime_exports_root_when_unset() {
         let root = TempDir::new().unwrap();
         let mut options = crate::ai::agent_sdk::tests::agent_driver_options();
         options.working_dir = root.path().to_path_buf();
-        let driver = app.add_model(|ctx| AgentDriver::new(options, ctx).unwrap());
+        let driver = app.add_model(|ctx| AgentDriver::new(options, &HarnessKind::Oz, ctx).unwrap());
         driver.read(&app, |driver, _| {
             for name in ["OZ_WORKSPACE_ROOT", "WARP_WORKSPACE_ROOT"] {
                 assert_eq!(
@@ -2781,13 +2790,20 @@ fn deferred_repository_runtime_rejects_relative_root() {
         let mut options = crate::ai::agent_sdk::tests::agent_driver_options();
         options.working_dir = "relative-workspace".into();
         app.add_model(|ctx| {
-            let error = AgentDriver::new(options, ctx).err().expect("invalid root");
+            let error = AgentDriver::new(options, &HarnessKind::Oz, ctx)
+                .err()
+                .expect("invalid root");
             assert!(matches!(
                 error,
                 AgentDriverError::ConfigBuildFailed(source)
                     if source.to_string().contains("workspace root must be absolute")
             ));
-            AgentDriver::new(crate::ai::agent_sdk::tests::agent_driver_options(), ctx).unwrap()
+            AgentDriver::new(
+                crate::ai::agent_sdk::tests::agent_driver_options(),
+                &HarnessKind::Oz,
+                ctx,
+            )
+            .unwrap()
         });
     });
 }

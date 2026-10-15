@@ -58,7 +58,7 @@ use self::bridge::{BridgeListener, bridge_command};
 use self::cli_transcript::CliTranscriptKind;
 use self::connection::{AcpConnection, InboundNotification, RpcError};
 use self::launch::AcpLaunchSpec;
-use self::manifest::ResolvedManifest;
+use self::manifest::HarnessManifest;
 use self::mapping::{AcpTurnMapper, TurnEvent};
 use self::model_config::configure_model_and_thinking_through_acp;
 use self::policy::{PolicyDecision, PolicyRequest};
@@ -84,7 +84,7 @@ use super::transcript_persistence::{
 };
 use super::{
     HarnessCleanupDisposition, HarnessRunner, JSONMCPServer, ResumePayload, SavePoint,
-    ThirdPartyHarness, validate_cli_installed,
+    ThirdPartyHarness, install_docs_url, validate_cli_installed,
 };
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIConversation, AIConversationId};
@@ -112,7 +112,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
 /// A third-party harness driven over ACP with manifest-defined launch and setup metadata.
 pub(super) struct AcpHarness {
     harness: Harness,
-    manifest: ResolvedManifest,
+    manifest: HarnessManifest,
     initial_attachments: Vec<DownloadedAttachment>,
 }
 
@@ -242,8 +242,8 @@ impl ThirdPartyHarness for AcpHarness {
         }
     }
 
-    fn install_docs_url(&self) -> Option<&str> {
-        self.manifest.install_docs_url.as_deref()
+    fn install_docs_url(&self) -> Option<&'static str> {
+        install_docs_url(self.harness)
     }
 
     fn validate(&self) -> Result<(), AgentDriverError> {
@@ -598,14 +598,7 @@ impl HarnessRunner for AcpHarnessRunner {
     }
     #[cfg(test)]
     fn prompt_text_for_test(&self) -> Option<&str> {
-        // The composed turn text is always the first block; attachments follow it.
-        match self.initial_prompt.first()? {
-            ContentBlock::Text { text } => Some(text),
-            ContentBlock::Image { .. }
-            | ContentBlock::ResourceLink { .. }
-            | ContentBlock::Resource { .. }
-            | ContentBlock::Unsupported => None,
-        }
+        Some(&self.prompt_text)
     }
 
     fn persistence(&self) -> &HarnessPersistence {

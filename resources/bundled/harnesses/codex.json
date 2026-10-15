@@ -5,7 +5,6 @@
     "program": "codex-acp",
     "args": []
   },
-  "install_docs_url": "https://developers.openai.com/codex/cli",
   "auth": {
     "check_command": "codex login status",
     "runtime_error_patterns": [

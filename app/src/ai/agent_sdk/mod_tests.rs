@@ -1,6 +1,8 @@
 use std::fs;
 use std::future::Future;
-use std::path::PathBuf;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -477,6 +479,51 @@ fn initialize_team_scope_test_app(app: &mut App, teams: Vec<Team>) {
             ctx,
         )
     });
+}
+
+/// Writes a sidecar layout for `harness` under `root`, returning the directory to point
+/// `WARP_HARNESS_SIDECAR` at. Test binaries have no bundled resources, so ACP harnesses can
+/// only resolve a manifest through this override.
+pub(crate) fn harness_sidecar_fixture(root: &Path, harness: Harness) -> PathBuf {
+    let dir = root.join(format!("{harness}-sidecar"));
+    let program = if cfg!(windows) {
+        "acp-adapter.exe"
+    } else {
+        "acp-adapter"
+    };
+    let executable = dir.join("usr/local/bin").join(program);
+    fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    fs::write(&executable, "").unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        dir.join("warp-harness.json"),
+        json!({
+            "schema_version": 1,
+            "harness": harness.to_string(),
+            "acp": {"program": program, "args": []},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    dir
+}
+
+/// Runs `f` with `WARP_HARNESS_SIDECAR` pointing at a fixture for `harness` under `root`.
+pub(crate) fn with_harness_sidecar<T>(root: &Path, harness: Harness, f: impl FnOnce() -> T) -> T {
+    const SIDECAR_ENV: &str = "WARP_HARNESS_SIDECAR";
+    let dir = harness_sidecar_fixture(root, harness);
+    let previous = std::env::var_os(SIDECAR_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(SIDECAR_ENV, &dir) };
+    let result = f();
+    match previous {
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(previous) => unsafe { std::env::set_var(SIDECAR_ENV, previous) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(SIDECAR_ENV) },
+    }
+    result
 }
 
 pub(crate) fn agent_driver_options() -> AgentDriverOptions {
