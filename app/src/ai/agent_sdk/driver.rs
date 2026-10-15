@@ -23,6 +23,7 @@ use oneshot::{Canceled, Receiver};
 use repo_metadata::local_model::IndexedRepoState;
 use repo_metadata::{RepoMetadataModel, RepositoryIdentifier};
 use session_sharing_protocol::sharer::SessionRetentionReason;
+use tempfile::TempDir;
 use tracing::Instrument as _;
 use uuid::Uuid;
 use warp_cli::agent::{Harness, HarnessTransport, OutputFormat};
@@ -723,7 +724,7 @@ pub struct AgentDriver {
     /// `build_runner` so harnesses can look up resolved secret values
     /// without re-deriving precedence.
     resolved_env_vars: Arc<HashMap<OsString, OsString>>,
-    harness_config_dir: Option<tempfile::TempDir>,
+    harness_config_dir: Option<TempDir>,
 
     output_format: OutputFormat,
 
