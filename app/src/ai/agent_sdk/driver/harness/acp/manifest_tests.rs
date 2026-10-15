@@ -38,77 +38,52 @@ fn write_executable(path: &Path) {
 }
 
 #[test]
-fn discovery_selects_override_then_mount_then_bundle_without_merging() {
+fn discovery_selects_override_then_mount_then_defaults_without_merging() {
     let root = tempdir().unwrap();
     let override_dir = root.path().join("override");
     let mounts = root.path().join("mnt");
     let mount_dir = mounts.join("pi-cli-sidecar");
-    let resources = root.path().join("resources");
     let mount_manifest = mount_dir.join(MANIFEST_FILE);
     write_manifest(&override_dir.join(MANIFEST_FILE), &["override"]);
     write_manifest(&mount_manifest, &["mount"]);
-    write_manifest(&resources.join("bundled/harnesses/pi.json"), &["bundle"]);
     for dir in [&override_dir, &mount_dir] {
         write_executable(&dir.join("usr/local/bin").join(PROGRAM));
     }
-    let mut bundle: Value =
-        serde_json::from_slice(&fs::read(resources.join("bundled/harnesses/pi.json")).unwrap())
-            .unwrap();
-    bundle["auth"] = json!({"check_command": "bundle-only"});
-    fs::write(
-        resources.join("bundled/harnesses/pi.json"),
-        bundle.to_string(),
-    )
-    .unwrap();
 
-    let selected = discover(Harness::Pi, Some(&override_dir), &mounts, Some(&resources)).unwrap();
+    let selected = discover(Harness::Pi, Some(&override_dir), &mounts).unwrap();
     assert_eq!(selected.launch.args, ["override"]);
     assert_eq!(
         Path::new(&selected.launch.program),
         override_dir.join("usr/local/bin").join(PROGRAM)
     );
-    assert!(selected.auth_check_command.is_none());
-    let selected = discover(Harness::Pi, None, &mounts, Some(&resources)).unwrap();
+    assert!(selected.is_sidecar);
+    let selected = discover(Harness::Pi, None, &mounts).unwrap();
     assert_eq!(selected.launch.args, ["mount"]);
-    assert!(selected.auth_check_command.is_none());
     fs::remove_file(mount_manifest).unwrap();
-    let selected = discover(Harness::Pi, None, &mounts, Some(&resources)).unwrap();
-    assert_eq!(selected.launch.args, ["bundle"]);
-    assert_eq!(selected.launch.program, PROGRAM);
-    assert_eq!(selected.auth_check_command.as_deref(), Some("bundle-only"));
+    let selected = discover(Harness::Pi, None, &mounts).unwrap();
+    assert_eq!(selected.launch.program, "pi-acp");
+    assert!(selected.launch.args.is_empty());
     assert!(!selected.is_sidecar);
 }
 
 #[test]
-fn override_errors_do_not_fall_through_to_a_valid_bundle() {
+fn override_errors_do_not_fall_through_to_defaults() {
     let root = tempdir().unwrap();
     let override_dir = root.path().join("override");
     let path = override_dir.join(MANIFEST_FILE);
-    let resources = root.path().join("resources");
-    write_manifest(&resources.join("bundled/harnesses/pi.json"), &[]);
     write_manifest(&path, &[]);
     let mut wrong: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     wrong["harness"] = json!("codex");
     fs::write(&path, wrong.to_string()).unwrap();
 
-    let error = discover(
-        Harness::Pi,
-        Some(&override_dir),
-        root.path(),
-        Some(&resources),
-    )
-    .err()
-    .unwrap();
+    let error = discover(Harness::Pi, Some(&override_dir), root.path())
+        .err()
+        .unwrap();
     assert!(error.to_string().contains("expected pi"));
     fs::remove_file(&path).unwrap();
-    let error = discover(
-        Harness::Pi,
-        Some(&override_dir),
-        root.path(),
-        Some(&resources),
-    )
-    .err()
-    .unwrap();
+    let error = discover(Harness::Pi, Some(&override_dir), root.path())
+        .err()
+        .unwrap();
     assert!(error.to_string().contains(&path.display().to_string()));
 }
 
@@ -173,8 +148,7 @@ fn manifest_directory_substitution_is_env_only_and_process_values_win() {
         return;
     }
     let root = tempdir().unwrap();
-    let resources = root.path().join("resources");
-    let path = resources.join("bundled/harnesses/pi.json");
+    let path = root.path().join(MANIFEST_FILE);
     write_manifest(&path, &["${MANIFEST_DIR}"]);
     let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     manifest["env"] = json!({
@@ -208,26 +182,6 @@ fn manifest_directory_substitution_is_env_only_and_process_values_win() {
 }
 
 #[test]
-fn bundled_manifests_use_schema_one_and_matching_harness_ids() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../resources/bundled/harnesses");
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        let harness = match path.file_stem().unwrap().to_str().unwrap() {
-            "claude" => Harness::Claude,
-            "codex" => Harness::Codex,
-            "gemini" => Harness::Gemini,
-            "pi" => Harness::Pi,
-            other => panic!("Unexpected bundled harness {other}"),
-        };
-        let manifest = read_manifest(&path, harness).unwrap();
-        assert_eq!(manifest.schema_version, 1);
-        if harness == Harness::Pi {
-            assert!(manifest.env.is_empty());
-        }
-    }
-}
-
-#[test]
 fn unsupported_versions_and_unknown_fields_are_rejected() {
     let root = tempdir().unwrap();
     let path = root.path().join(MANIFEST_FILE);
@@ -254,30 +208,5 @@ fn unsupported_versions_and_unknown_fields_are_rejected() {
             format!("{:#}", read_manifest(&path, Harness::Pi).unwrap_err())
                 .contains("unknown field")
         );
-    }
-}
-
-#[test]
-fn missing_manifest_error_lists_all_discovery_locations() {
-    let root = tempdir().unwrap();
-    let mounts = root.path().join("mnt");
-    let resources = root.path().join("resources");
-    let error = discover(Harness::Pi, None, &mounts, Some(&resources))
-        .err()
-        .unwrap()
-        .to_string();
-    for expected in [
-        "pi".to_owned(),
-        "$WARP_HARNESS_SIDECAR/warp-harness.json".to_owned(),
-        mounts
-            .join("pi-cli-sidecar/warp-harness.json")
-            .display()
-            .to_string(),
-        resources
-            .join("bundled/harnesses/pi.json")
-            .display()
-            .to_string(),
-    ] {
-        assert!(error.contains(&expected), "{error}");
     }
 }

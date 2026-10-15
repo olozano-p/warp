@@ -14,7 +14,6 @@ use super::attachments::ResolvedFile;
 use super::protocol::PromptCapabilities;
 use super::*;
 use crate::ai::agent_sdk::driver::harness::{HarnessKind, harness_kind};
-use crate::ai::agent_sdk::tests::with_harness_sidecar;
 use crate::server::server_api::ServerApiProvider;
 use crate::terminal::History;
 use crate::terminal::model::block::BlockMetadata;
@@ -153,10 +152,7 @@ fn initial_files_reach_the_acp_runner_without_changing_the_pty_prompt() {
             });
             let foreground = driver.update(&mut app, |_, ctx| ctx.spawner());
             let terminal_driver = driver.read(&app, |driver, _| driver.terminal_driver.clone());
-            let mut harness = with_harness_sidecar(temp.path(), Harness::Codex, || {
-                harness_kind(Harness::Codex, transport)
-            })
-            .unwrap();
+            let mut harness = harness_kind(Harness::Codex, transport).unwrap();
             harness.set_initial_attachments(vec![DownloadedAttachment {
                 file_id: "attachment-id".to_owned(),
                 file_name: "image.png".to_owned(),
@@ -247,30 +243,12 @@ fn initial_files_reach_the_acp_runner_without_changing_the_pty_prompt() {
     });
 }
 
-/// An ACP harness whose manifest carries no launch or auth details.
-fn bare_acp_harness(harness: Harness) -> AcpHarness {
-    AcpHarness {
-        harness,
-        manifest: HarnessManifest {
-            launch: AcpLaunchSpec {
-                program: String::new(),
-                args: Vec::new(),
-            },
-            auth_check_command: None,
-            runtime_error_patterns: Vec::new(),
-            env: HashMap::new(),
-            is_sidecar: false,
-        },
-        initial_attachments: Vec::new(),
-    }
-}
-
 #[test]
 fn initial_prompt_links_files_after_server_composed_text() {
     let dir = std::env::temp_dir().join("acp-initial-attachments");
     let screenshot = dir.join("image #雪%.png");
     let notes = dir.join("notes.txt");
-    let harness = bare_acp_harness(Harness::Claude);
+    let harness = AcpHarness::new(Harness::Claude).unwrap();
     let text = harness.initial_prompt_text(
         "inspect these",
         Some("system"),
@@ -323,7 +301,7 @@ fn initial_prompt_links_files_after_server_composed_text() {
 
 #[test]
 fn initial_prompt_without_files_keeps_the_existing_text() {
-    let harness = bare_acp_harness(Harness::Codex);
+    let harness = AcpHarness::new(Harness::Codex).unwrap();
 
     let text = harness.initial_prompt_text("hello", Some("staged in config"), Some(" "), None);
 

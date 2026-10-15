@@ -7,10 +7,13 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use serde::Deserialize;
 use typed_path::{WindowsComponent, WindowsPath};
 use warp_cli::agent::Harness;
-use warp_core::paths::bundled_resources_dir;
 use warp_util::path::file_exists_and_is_executable;
 
 use super::super::super::AgentDriverError;
+use super::super::ThirdPartyHarness;
+use super::super::claude_code::ClaudeHarness;
+use super::super::codex::CodexHarness;
+use super::super::gemini::GeminiHarness;
 use super::launch::AcpLaunchSpec;
 
 const SIDECAR_ENV: &str = "WARP_HARNESS_SIDECAR";
@@ -37,8 +40,8 @@ struct Auth {
     runtime_error_patterns: Vec<String>,
 }
 
-/// What a harness's sidecar or bundle declares about it, with paths and environment resolved
-/// against the manifest's location.
+/// What a harness's sidecar declares about it, with paths and environment resolved against the
+/// manifest's location, or the built-in defaults for a natively installed harness.
 pub(super) struct HarnessManifest {
     pub(super) launch: AcpLaunchSpec,
     pub(super) auth_check_command: Option<String>,
@@ -49,62 +52,41 @@ pub(super) struct HarnessManifest {
 
 pub(super) fn resolve(harness: Harness) -> Result<HarnessManifest, AgentDriverError> {
     let override_dir = std::env::var_os(SIDECAR_ENV).map(PathBuf::from);
-    discover(
-        harness,
-        override_dir.as_deref(),
-        Path::new("/mnt"),
-        bundled_resources_dir().as_deref(),
-    )
-    .map_err(|error| AgentDriverError::HarnessSetupFailed {
-        harness: harness.to_string(),
-        reason: format!("{error:#}"),
+    discover(harness, override_dir.as_deref(), Path::new("/mnt")).map_err(|error| {
+        AgentDriverError::HarnessSetupFailed {
+            harness: harness.to_string(),
+            reason: format!("{error:#}"),
+        }
     })
 }
 
+/// Selects the sidecar manifest named by `override_dir`, else the one on the harness's mount,
+/// else the built-in defaults. An override that is set but unusable is an error rather than a
+/// fall-through.
 fn discover(
     harness: Harness,
     override_dir: Option<&Path>,
     mounts_dir: &Path,
-    resources_dir: Option<&Path>,
 ) -> Result<HarnessManifest> {
     let mount_path = mounts_dir
         .join(format!("{harness}-cli-sidecar"))
         .join(MANIFEST_FILE);
-    let bundle_path = resources_dir.map(|root| {
-        root.join("bundled/harnesses")
-            .join(format!("{harness}.json"))
-    });
-    let (path, is_sidecar) = if let Some(dir) = override_dir {
-        (dir.join(MANIFEST_FILE), true)
+    let path = if let Some(dir) = override_dir {
+        dir.join(MANIFEST_FILE)
     } else if mount_path
         .try_exists()
         .with_context(|| format!("Cannot inspect {}", mount_path.display()))?
     {
-        (mount_path, true)
-    } else if let Some(path) = &bundle_path
-        && path
-            .try_exists()
-            .with_context(|| format!("Cannot inspect {}", path.display()))?
-    {
-        (path.clone(), false)
+        mount_path
     } else {
-        let bundle_location = bundle_path
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| {
-                format!("<bundled_resources_dir>/bundled/harnesses/{harness}.json (unavailable)")
-            });
-        bail!(
-            "No ACP manifest for {harness}. Searched: ${SIDECAR_ENV}/{MANIFEST_FILE} \
-             ({SIDECAR_ENV} unset), {}; {bundle_location}",
-            mount_path.display()
-        );
+        log::info!("Using built-in ACP defaults for {harness}");
+        return default_manifest(harness)
+            .with_context(|| format!("The {harness} harness cannot be driven over ACP."));
     };
     let dir = absolute(path.parent().context("Manifest has no parent directory")?)?;
     let mut manifest = read_manifest(&path, harness)?;
-    if is_sidecar {
-        manifest.acp.program = resolve_sidecar_program(&dir, &manifest.acp.program)
-            .with_context(|| format!("Invalid ACP program in {}", path.display()))?;
-    }
+    manifest.acp.program = resolve_sidecar_program(&dir, &manifest.acp.program)
+        .with_context(|| format!("Invalid ACP program in {}", path.display()))?;
     let env = resolve_env(&manifest.env, &dir);
     log::info!("Selected ACP manifest for {harness}: {}", path.display());
     Ok(HarnessManifest {
@@ -112,7 +94,31 @@ fn discover(
         auth_check_command: manifest.auth.check_command,
         runtime_error_patterns: manifest.auth.runtime_error_patterns,
         env,
-        is_sidecar,
+        is_sidecar: true,
+    })
+}
+
+/// The ACP adapter shipped alongside a natively installed harness CLI, resolved on `PATH`, with
+/// the auth knowledge the terminal transport for the same harness already carries.
+fn default_manifest(harness: Harness) -> Option<HarnessManifest> {
+    let (program, args, pty): (&str, &[&str], Option<&dyn ThirdPartyHarness>) = match harness {
+        Harness::Claude => ("claude-code-acp", &[], Some(&ClaudeHarness)),
+        Harness::Codex => ("codex-acp", &[], Some(&CodexHarness)),
+        Harness::Gemini => ("gemini", &["--experimental-acp"], Some(&GeminiHarness)),
+        Harness::Pi => ("pi-acp", &[], None),
+        Harness::Oz | Harness::OpenCode | Harness::Unknown => return None,
+    };
+    Some(HarnessManifest {
+        launch: AcpLaunchSpec {
+            program: program.to_owned(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        },
+        auth_check_command: pty.and_then(ThirdPartyHarness::auth_check_command),
+        runtime_error_patterns: pty
+            .map(ThirdPartyHarness::runtime_error_patterns_for_run)
+            .unwrap_or_default(),
+        env: HashMap::new(),
+        is_sidecar: false,
     })
 }
 

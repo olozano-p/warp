@@ -2510,10 +2510,6 @@ fn deferred_repository_semantic_acp_consumes_server_resolved_text_once() {
             .env("HOME", home.path())
             .env("USERPROFILE", home.path())
             .env("CODEX_HOME", home.path().join(".codex"))
-            .env(
-                "WARP_HARNESS_SIDECAR",
-                crate::ai::agent_sdk::tests::harness_sidecar_fixture(home.path(), Harness::Codex),
-            )
             .env("WARP_ISOLATION_PLATFORM", "docker")
             .env("WARP_WORKLOAD_TOKEN", "test-workload-token")
             .output()
@@ -2661,13 +2657,7 @@ fn deferred_repository_semantic_skill_publication_without_initial_inventory() {
                             ManagedSecretValue::raw_value("1"),
                         );
                     }
-                    let sidecar_root = TempDir::new().unwrap();
-                    let harness = crate::ai::agent_sdk::tests::with_harness_sidecar(
-                        sidecar_root.path(),
-                        harness,
-                        || harness_kind(harness, transport),
-                    )
-                    .unwrap();
+                    let harness = harness_kind(harness, transport).unwrap();
                     let driver =
                         app.add_model(|ctx| AgentDriver::new(options, &harness, ctx).unwrap());
                     let foreground = driver.update(&mut app, |driver, ctx| {
